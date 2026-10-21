@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>習慣スコア デイリーログ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center py-10 px-4">
+  <div class="w-full max-w-lg">
+    <h1 class="text-2xl font-bold text-center mb-1">習慣スコア デイリーログ</h1>
+    <p class="text-gray-400 text-sm text-center mb-6">Habit Score Daily Log</p>
+
+    <!-- Today's score + streak -->
+    <div class="grid grid-cols-2 gap-4 mb-6">
+      <div class="bg-gray-800 rounded-2xl p-5 text-center">
+        <div class="text-xs text-gray-400 mb-1">本日のスコア</div>
+        <div id="today-score" class="text-4xl font-bold text-blue-400">0%</div>
+        <div id="score-bar-wrap" class="mt-2 w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+          <div id="score-bar" class="h-2 rounded-full bg-blue-500 transition-all duration-500" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="bg-gray-800 rounded-2xl p-5 text-center">
+        <div class="text-xs text-gray-400 mb-1">連続達成日数</div>
+        <div id="streak-count" class="text-4xl font-bold text-orange-400">0</div>
+        <div class="text-xs text-gray-500 mt-1">日連続 (スコア≥50%)</div>
+      </div>
+    </div>
+
+    <!-- Weekly chart -->
+    <div class="bg-gray-800 rounded-2xl p-5 mb-6">
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">過去7日間のスコア</h2>
+      <div id="weekly-chart" class="flex items-end gap-1 h-20"></div>
+      <div id="weekly-labels" class="flex gap-1 mt-1"></div>
+    </div>
+
+    <!-- Today's date + habits -->
+    <div class="bg-gray-800 rounded-2xl p-5 mb-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold text-gray-300">今日の習慣チェック</h2>
+        <span id="today-date" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="habits-checklist" class="space-y-2"></div>
+      <div id="no-habits-msg" class="text-center text-gray-500 text-sm py-4">
+        習慣を追加してください
+      </div>
+    </div>
+
+    <!-- Add habit form -->
+    <div class="bg-gray-800 rounded-2xl p-5">
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">習慣を追加</h2>
+      <div class="space-y-3">
+        <div>
+          <label for="habit-name" class="block text-xs text-gray-400 mb-1">習慣名</label>
+          <input id="habit-name" type="text" placeholder="例: 30分ウォーキング"
+            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="habit-weight" class="block text-xs text-gray-400 mb-1">重要度 (1〜3)</label>
+            <select id="habit-weight"
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500">
+              <option value="1">1 — 軽い</option>
+              <option value="2" selected>2 — 普通</option>
+              <option value="3">3 — 重要</option>
+            </select>
+          </div>
+          <div>
+            <label for="habit-icon" class="block text-xs text-gray-400 mb-1">アイコン</label>
+            <select id="habit-icon"
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500">
+              <option value="🏃">🏃 運動</option>
+              <option value="📚">📚 読書</option>
+              <option value="💊">💊 服薬</option>
+              <option value="🥗">🥗 食事</option>
+              <option value="😴">😴 睡眠</option>
+              <option value="🧘">🧘 瞑想</option>
+              <option value="💧">💧 水分</option>
+              <option value="✍️">✍️ 日記</option>
+              <option value="🎯">🎯 目標</option>
+              <option value="⭐">⭐ その他</option>
+            </select>
+          </div>
+        </div>
+        <button id="add-habit-btn"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm">
+          追加する
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    const STORAGE_KEY = 'habit-log-v1';
+
+    function todayStr() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function loadData() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { habits: [], logs: {} };
+      } catch (e) {
+        return { habits: [], logs: {} };
+      }
+    }
+
+    function saveData(data) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    let data = loadData();
+
+    function calcScore(habits, checkedIds) {
+      const max = habits.reduce((s, h) => s + h.weight, 0);
+      if (max === 0) return 0;
+      const done = habits.filter(h => checkedIds.includes(h.id)).reduce((s, h) => s + h.weight, 0);
+      return Math.round((done / max) * 100);
+    }
+
+    function calcStreak(habits, logs) {
+      let streak = 0;
+      const today = todayStr();
+      let d = new Date(today);
+      while (true) {
+        const ds = d.toISOString().slice(0, 10);
+        const checked = logs[ds] || [];
+        const score = calcScore(habits, checked);
+        if (score >= 50) {
+          streak++;
+          d.setDate(d.getDate() - 1);
+        } else {
+          break;
+        }
+      }
+      return streak;
+    }
+
+    function getLast7Days() {
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+      }
+      return days;
+    }
+
+    function renderWeeklyChart() {
+      const days = getLast7Days();
+      const chart = document.getElementById('weekly-chart');
+      const labels = document.getElementById('weekly-labels');
+      chart.innerHTML = '';
+      labels.innerHTML = '';
+
+      days.forEach(day => {
+        const checked = data.logs[day] || [];
+        const score = calcScore(data.habits, checked);
+        const pct = score;
+        const isToday = day === todayStr();
+
+        const bar = document.createElement('div');
+        bar.className = 'flex-1 flex flex-col items-center justify-end gap-1';
+
+        const fill = document.createElement('div');
+        fill.className = `w-full rounded-t transition-all ${score >= 50 ? 'bg-blue-500' : 'bg-gray-600'} ${isToday ? 'ring-1 ring-blue-400' : ''}`;
+        fill.style.height = `${Math.max(pct, 2)}%`;
+        fill.title = `${day}: ${score}%`;
+
+        bar.appendChild(fill);
+        chart.appendChild(bar);
+
+        const label = document.createElement('div');
+        label.className = `flex-1 text-center text-xs ${isToday ? 'text-blue-400 font-bold' : 'text-gray-500'}`;
+        const d = new Date(day + 'T00:00:00');
+        const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+        label.textContent = isToday ? '今日' : dayNames[d.getDay()];
+        labels.appendChild(label);
+      });
+    }
+
+    function renderChecklist() {
+      const today = todayStr();
+      const checked = data.logs[today] || [];
+      const container = document.getElementById('habits-checklist');
+      const noMsg = document.getElementById('no-habits-msg');
+      container.innerHTML = '';
+
+      document.getElementById('today-date').textContent = today;
+
+      if (data.habits.length === 0) {
+        noMsg.classList.remove('hidden');
+      } else {
+        noMsg.classList.add('hidden');
+        data.habits.forEach(habit => {
+          const isDone = checked.includes(habit.id);
+          const item = document.createElement('div');
+          item.className = `flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer ${isDone ? 'bg-blue-900 bg-opacity-40 border border-blue-700' : 'bg-gray-700 border border-gray-600 hover:border-gray-500'}`;
+          item.setAttribute('role', 'checkbox');
+          item.setAttribute('aria-checked', isDone.toString());
+          item.setAttribute('tabindex', '0');
+
+          const weightColors = { 1: 'text-gray-400', 2: 'text-yellow-400', 3: 'text-orange-400' };
+
+          item.innerHTML = `
+            <div class="text-2xl">${habit.icon}</div>
+            <div class="flex-1">
+              <div class="text-sm font-medium ${isDone ? 'text-blue-300 line-through' : 'text-gray-100'}">${escapeHtml(habit.name)}</div>
+              <div class="text-xs ${weightColors[habit.weight]}">重要度: ${'★'.repeat(habit.weight)}${'☆'.repeat(3 - habit.weight)}</div>
+            </div>
+            <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center ${isDone ? 'bg-blue-500 border-blue-500' : 'border-gray-500'}">
+              ${isDone ? '<svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>' : ''}
+            </div>
+            <button type="button" aria-label="${escapeHtml(habit.name)}を削除" class="delete-habit text-gray-600 hover:text-red-400 text-sm transition-colors ml-1">✕</button>
+          `;
+
+          // Toggle check
+          item.addEventListener('click', (e) => {
+            if (e.target.closest('.delete-habit')) return;
+            const todayLog = data.logs[today] || [];
+            if (todayLog.includes(habit.id)) {
+              data.logs[today] = todayLog.filter(id => id !== habit.id);
+            } else {
+              data.logs[today] = [...todayLog, habit.id];
+            }
+            saveData(data);
+            render();
+          });
+
+          item.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); item.click(); }
+          });
+
+          item.querySelector('.delete-habit').addEventListener('click', (e) => {
+            e.stopPropagation();
+            data.habits = data.habits.filter(h => h.id !== habit.id);
+            saveData(data);
+            render();
+          });
+
+          container.appendChild(item);
+        });
+      }
+    }
+
+    function renderScore() {
+      const today = todayStr();
+      const checked = data.logs[today] || [];
+      const score = calcScore(data.habits, checked);
+      const streak = calcStreak(data.habits, data.logs);
+
+      document.getElementById('today-score').textContent = `${score}%`;
+      document.getElementById('score-bar').style.width = `${score}%`;
+      document.getElementById('score-bar').className = `h-2 rounded-full transition-all duration-500 ${score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-blue-500' : 'bg-red-500'}`;
+      document.getElementById('today-score').className = `text-4xl font-bold ${score >= 80 ? 'text-green-400' : score >= 50 ? 'text-blue-400' : 'text-red-400'}`;
+      document.getElementById('streak-count').textContent = streak;
+    }
+
+    function render() {
+      renderChecklist();
+      renderScore();
+      renderWeeklyChart();
+    }
+
+    document.getElementById('add-habit-btn').addEventListener('click', () => {
+      const name = document.getElementById('habit-name').value.trim();
+      if (!name) { document.getElementById('habit-name').focus(); return; }
+      const weight = parseInt(document.getElementById('habit-weight').value);
+      const icon = document.getElementById('habit-icon').value;
+      const id = Date.now().toString();
+      data.habits.push({ id, name, weight, icon });
+      saveData(data);
+      document.getElementById('habit-name').value = '';
+      render();
+    });
+
+    document.getElementById('habit-name').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('add-habit-btn').click();
+    });
+
+    render();
+  </script>
+</body>
+</html>
